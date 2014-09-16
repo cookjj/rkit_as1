@@ -1,0 +1,167 @@
+
+
+Jeffrey J. Cook
+O.Ss. csci 3753 / Black
+Assignment 1
+
+
+1. Advantages of LKMs
+    The most significant advantage of LKMs compared to directly modifying
+the kernel is that an entire kernel rebuild plus requisite reboot is not
+necessary to use a new feature. In modifying the kernel directly, you
+must 1) have the source, 2) configure it correctly for the current system,
+3) build it, 4) install it, 5) reboot, and have the permissions for all
+this. If anything goes wrong in the course, then it may be necessary to
+repeat most steps of it as well. LKMs reduce the needs to successfully
+building the module source and having permissions to load/remove
+the module.
+
+2. Makefile for LKM
+    Here is my makefile with Ubantu-style module loading/unloading
+with `sudo insmod`:
+
+###
+obj-m := rkit.o
+KDIR := /lib/modules/$(shell uname -r)/build
+PWD := $(shell pwd)
+
+all:
+	$(MAKE) -C $(KDIR) M=$(PWD) modules
+
+clean:
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
+
+#UBANTU
+install-ubantu:
+	sudo insmod ./rkit.ko ; dmesg|tail -n 5
+
+install:
+	modprobe ./rkit.ko ; dmes|tail -n 5
+
+uninstall:
+	rmmod rkit.ko ; dmesg|tail -n5
+
+###
+
+make -C /lib/modules/3.14.18-jjc0x01/build M=/home/cookjj/edu/os3753_fall2014/rkit modules
+make[1]: Entering directory `/bpool/build/linux-3.14.18'
+  CC [M]  /home/cookjj/edu/os3753_fall2014/rkit/rkit.o
+  Building modules, stage 2.
+  MODPOST 1 modules
+  CC      /home/cookjj/edu/os3753_fall2014/rkit/rkit.mod.o
+  LD [M]  /home/cookjj/edu/os3753_fall2014/rkit/rkit.ko
+make[1]: Leaving directory `/bpool/build/linux-3.14.18'
+
+###
+
+3. C types and system calls
+a. ssize_t -- signed size_t type for representing block sizes.
+b. asmlinkage -- keyword prevents compiler from optimizing function
+   arguments into registers, instead sticking to strict stack convention
+   in order to have conflict-free C/assembly linkage.
+c. copy_from_user -- copies bytes from User Space.
+d. sys_call_table -- a sort of table where sys_call_table[syscall_number]
+   gives the address of the given system call function. rkit.c locates the
+   table by searching an address range for the address of the call sys_close.
+e. kmalloc() is used instead of malloc() in order to create a kernel-space
+   buffer. We must compare the buffer to the "protected hidden" string using
+   strstr(). If one string is user-space and one is kernel-space the operation
+   results in failure.
+f. Our module uses printk(char*) and not printf since the output goes to the
+   system log, shewn by the command `dmesg', e.g.:
+###
+$ dmesg|tail
+[    9.412772] IPv6: ADDRCONF(NETDEV_CHANGE): eth0: link becomes ready
+[   10.258619] vboxsf: Successfully loaded version 4.3.10_Ubuntu (interface 0x00010004)
+[   10.936628] init: plymouth-upstart-bridge main process ended, respawning
+[   38.743228] audit_printk_skb: 150 callbacks suppressed
+[   38.743232] type=1400 audit(1410635468.205:62): apparmor="STATUS" operation="profile_replace" profile="unconfined" name="/usr/lib/cups/backend/cups-pdf" pid=2196 comm="apparmor_parser"
+[   38.743238] type=1400 audit(1410635468.205:63): apparmor="STATUS" operation="profile_replace" profile="unconfined" name="/usr/sbin/cupsd" pid=2196 comm="apparmor_parser"
+[   38.743447] type=1400 audit(1410635468.205:64): apparmor="STATUS" operation="profile_replace" profile="unconfined" name="/usr/sbin/cupsd" pid=2196 comm="apparmor_parser"
+[  602.680931] rkit: module license 'unspecified' taints kernel.
+[  602.681014] Disabling lock debugging due to kernel taint
+[  602.682363] rkit: sys_call_table is at: ffffffff81801400
+###
+
+g. write_cr0() is essential in our rootkit. The syscall table is marked read-
+   only in the kernel data section. Our easiest way of circumventing this
+   restriction is to disable P-mode temporarily in the processor register
+   called CR0 using this kernel function write_cr0(). We copy CR0 and change
+   the appropriate flag and write it back. Next the syscall sys_write
+   function address is exchanged with our rootkit's write function since we
+   can modify the section. Last, we re-enable P-mode restrictions with
+   another call to write_cr0.
+
+h. rkit_init() is the function called once the kernel first registers the
+   inserted module. Ours goes about locating the sys_call_table, then
+   proceeds to modify it as explained in part (g).
+
+i. rkit_write() is the function we've created to take the place of the
+   kernel's sys_write function. It has the same function signature, but
+   operates differently as follows: It copies the userland text buffer
+   to be printed into a kernel-space buffer and runs strstr() to search
+   if the "protected hidden" string "h1dd3n" is found therein. If so, it
+   frees the buffer and returns and error code. If the string is not
+   part of the buffer, then it is printed as normal using the standard
+   sys_write function, whose address has been saved by us in (o_write).
+
+4. The special string does not appear since we've circumvented the sys_write
+   function, used by echo fundamentally, and designed a replacement
+   function that will specially not print that string.
+
+5. module list
+###
+Module                  Size  Used by
+rkit                   12629  0 
+vboxsf                 43786  0 
+bnep                   19624  2 
+rfcomm                 69160  0 
+bluetooth             391196  10 bnep,rfcomm
+joydev                 17381  0 
+snd_intel8x0           38153  2 
+snd_ac97_codec        130285  1 snd_intel8x0
+ac97_bus               12730  1 snd_ac97_codec
+snd_pcm               102099  2 snd_ac97_codec,snd_intel8x0
+snd_page_alloc         18710  2 snd_intel8x0,snd_pcm
+snd_seq_midi           13324  0 
+snd_seq_midi_event     14899  1 snd_seq_midi
+snd_rawmidi            30144  1 snd_seq_midi
+snd_seq                61560  2 snd_seq_midi_event,snd_seq_midi
+snd_seq_device         14497  3 snd_seq,snd_rawmidi,snd_seq_midi
+snd_timer              29482  2 snd_pcm,snd_seq
+snd                    69238  12 snd_ac97_codec,snd_intel8x0,snd_timer,snd_pcm,snd_seq,snd_rawmidi,snd_seq_device,snd_seq_midi
+serio_raw              13462  0 
+soundcore              12680  1 snd
+parport_pc             32701  0 
+ppdev                  17671  0 
+lpc_ich                21080  0 
+lp                     17759  0 
+parport                42348  3 lp,ppdev,parport_pc
+mac_hid                13205  0 
+i2c_piix4              22155  0 
+vboxvideo              12658  0 
+drm                   303102  1 vboxvideo
+vboxguest             248441  7 vboxsf
+btrfs                 835954  1 
+xor                    21411  1 btrfs
+raid6_pq               97812  1 btrfs
+libcrc32c              12644  1 btrfs
+hid_generic            12548  0 
+usbhid                 52570  0 
+hid                   106148  2 hid_generic,usbhid
+psmouse               106678  0 
+ahci                   25819  1 
+libahci                32560  1 ahci
+e1000                 145174  0 
+###
+    We notice that our rootkit module is by no means hidden to users.
+
+6. The hidden string appears with echo after removing our module since the
+   rkit_exit() function undoes the circumventing of the sys_call_table.
+
+7. These two lines prevent the rootkit from appearing in the module list.
+
+8. We may have run to rebooting the system to remove the module when it
+   is hidden.
+
+9. 
